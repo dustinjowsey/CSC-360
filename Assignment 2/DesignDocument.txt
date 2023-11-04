@@ -1,0 +1,141 @@
+CSC-360 A2 Design Document
+
+Dustin Jowsey
+V00964979
+
+1. I chose to use a thread for each clerk and a thread for each customer.
+	a) I intend customer threads to handle inserting themselves into each queue and wait for their turn to be
+	   serviced by the next available clerk. Furthermore each customer thread is responsible for letting the 
+	   business class go first if they are in economy class.
+	b) I intend the clerk threads to deal with waiting for customers service time as well as managing how many
+	   clerks are available and to let the customers know if they are available.
+	c) There will be one main thread that will simply wait for all customers to return.
+2. Each thread will work indepently. Thus I used a decent amount of mutexes so threads weren’t accessing specific 
+   data at the same time.
+3. I used 6 mutexes.
+	a) One called customerThreadExitMutex which simply caused a customer thread to wait for the clerk to finish 
+	   serving them before exiting the thread. This is because if a clerk was still serving a customer, say the 
+	   last customer, but that customer thread exited then the main thread would progress as it was only 
+	   waiting for all customers to return and not clerks to finish. This caused the whole process to terminate
+	   before 
+	   some customers finished their service time.
+	b) One called queueHead which was used so that only one customer could call a clerk at a time. I did this 
+	   because customers were signalling clerks at the same time making one clerk serve two or more customers
+	   at the same time.
+	c) One called clerksAvailableMutex which is used to stop customers from spin looping and using unnecessary 
+	   recourses. This mutex is used when all clerks are serving customers. It is unlocked by the new head of a 
+	   queue when a clerk signals all customers to let them know they finished serving a customer and can serve 
+	   another.
+	d) One called buisQueueMutex which is used so that only one customer in the business class is inserted or 
+	   popped at a given moment.As well as the queueLength of the business class is only modified by one 
+	   business class customer at a time.
+	e) One called stndQueueMutex which does the same as buisQueueMutex, but for economy class customers.
+	f) One called oneClerkOnly which is used within the clerk threads so that only one clerk will access certain 
+	   information at a given time. For example incrementing/decrementing how many clerks are available or only 
+	   allowing one clerk to check what queue their customer is in.
+4. Yes the main thread is idle until all customers return.
+5. I used a node to represent customers. Each node contains all the info of each customer as well as a start time 
+   that is stored when a customer enters a queue. This is used later in a clerk thread to calculate waiting time.
+6. As explained in 3. And 7. I used a number of mutexes and condition variables so that certain global variables as
+   well as the info in the queue data structure was not modified by two threads at the same time.
+7. I used 3 condition variables.
+	a) One called customerThreadExit
+		i. This condition variable is signalled by the clerk when the clerk finishes serving a customer 
+		   because otherwise that customer would exit the thread before finishing its service time. This 
+		   could cause the program to finish before customers are done being serviced.
+		ii. I used the mutex customerThreadExitMutex simply so customers waiting to exit used a separate 
+		    mutex from the other conditions
+		iii. pthread_mutex_unlock()
+	b) One called servedCustomer
+		i. This condition variable gets signalled by the clerk thread to let customers still waiting in the
+		   queue know that there is a clerk available or that the head customer at the head of a queue is being
+		   served, so there is a new head of that queue that can check if any clerks are available.
+		ii. I used this condition variable with clerksAvailableMutex so that all customers waiting to be 
+		    serviced will be notified that a clerk is available and can check if they are at the head of the 
+		    queue.
+		iii. pthread_mutex_unlock()
+	c) One called custWaitCond
+		i. This condition variable gets signalled when a customer at the head of a queue is ready to be
+		   serviced.This wakes up the clerk so that the clerk can serve a customer.
+		ii. I used this condition variable with clerksAvailableMutex because that mutex gets locked when
+		    a clerk is waiting for a new customer to serve.
+		iii. pthread_mutex_unlock()
+
+8.
+
+main():
+	get info from input file
+	initialize mutex/condition variables
+	create clerk threads first so they are ready for customers
+	create customer threads
+	wait for all customer threads to return
+
+	caclulate overall wait times.
+
+customer_entry(custInfo):
+	If customer class == economy:
+		lock(stndQueueMutex)
+	Else:
+		lock(buisQueueMutex)
+
+	Insert customer into designated queue
+	Increase queue count
+	Get customer start time (Used to calculate waiting time later)
+	If customer class == economy:
+		unlock(stndQueueMutex)
+	Else:
+		Unlock(buisQueueMutex)
+
+	While(TRUE):
+		If customer is at head of their queue:
+			//Want to serve business class first
+		while(customer in economy class AND there are customers in buisQueue OR there are no clerks available):
+			wait(servedCustomer, clerksAvailable)
+		unlock(&clerksAvailable)
+
+			Lock(queueHead)
+			Queuestatus = customer class
+			Signal(custWaitCond)
+			Break
+
+		While customer is not at the front OR no clerks:
+			Wait(servedCustomer, clerksAvailablemutx)
+		unlock(clerksAvailableMutex)
+		
+	Wait(customerThreadExit, customerThreadExitMutex)
+	Unlock(customerThreadExitMutex)
+
+	Pthread_exit()
+
+Clerk_entry(clerkNumber):
+	While(TRUE):
+		Wait(custWaitCond)
+		Get customer class from queuestatus
+		unlock(queueHead)
+
+		lock(oneClerkOnly)
+		Numberclerksavailable—
+		Unlock(oneClerkOnly)
+
+		If customer class == economy:
+			lock(stndQueueMutex)
+		Else:
+			lock(buisQueueMutex)
+		Dequeue customer in queue stored at Queuestatus
+		//want to let customers know there is a new head of the queue
+		broadcast(servedCustomer)
+		If customer class == economy:
+			lock(stndQueueMutex)
+		Else:
+			lock(buisQueueMutex)
+
+
+		Get time
+		Serve customer for service time amount
+		Lock(oneClerkOnly)
+		Numberclerksavailable++
+		Unlock(oneClerkOnly)
+		Signal(customerThreadExit)
+		Signal(servedCustomer)
+
+	return

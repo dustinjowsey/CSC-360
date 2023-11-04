@@ -1,3 +1,5 @@
+# CSC-360 Assignment 3
+
 Program diskinfo is used to display basic info about a FAT12 image.
 
 To use the program.
